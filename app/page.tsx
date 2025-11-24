@@ -1,103 +1,148 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect } from "react";
+import Navigation from "@/components/navigation";
+import LibraryView from "@/components/library-view";
+import UploadView from "@/components/upload-view";
+import ReaderView from "@/components/reader-view";
+import { addBook, getAllBooks } from "@/lib/bookService";
+import { deleteBook } from "@/lib/bookService";
+import { updateStatus } from "@/lib/bookService";
+
+type View = "library" | "upload" | "reader";
+
+// Updated to match Supabase structure
+interface Book {
+  id: string;
+  title: string;
+  filename: string;
+  file_size: number;
+  status: "done" | "started" | "not-started";
+  file_url: string;
+  created_at: string;
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [currentView, setCurrentView] = useState<View>("library");
+  const [books, setBooks] = useState<Book[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  // Calculate storage used from books
+  const storageUsed = books.reduce(
+    (sum, book) => sum + book.file_size / (1024 * 1024),
+    0
+  );
+
+  const handleRead = (book: Book) => {
+    if (!book.file_url) {
+      console.error("No PDF URL found for this book!");
+      return;
+    }
+
+    window.open(book.file_url, "_blank");
+  };
+
+  // Load books from Supabase when component mounts
+  useEffect(() => {
+    async function loadBooks() {
+      try {
+        const data = await getAllBooks();
+        setBooks(data);
+      } catch (error) {
+        console.error("Failed to load books:", error);
+        alert("Failed to load books. Check console for details.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadBooks();
+  }, []);
+
+  const handleAddBook = async (file: File) => {
+    const fileSizeMB = file.size / (1024 * 1024);
+    await addBook(file);
+    const newBook: Book = {
+      id: Date.now().toString(),
+      title: file.name.replace(".pdf", ""),
+      file_size: Number.parseFloat(fileSizeMB.toFixed(1)),
+      status: "not-started",
+      filename: file.name,
+      file_url: "", // Will be set when uploaded to Supabase
+      created_at: new Date().toISOString(),
+    };
+    setBooks([newBook, ...books]);
+  };
+
+  const handleDeleteBook = async (id: string) => {
+    const book = books.find((b) => b.id === id);
+
+    if (book) {
+      await deleteBook(id);
+      setBooks(books.filter((b) => b.id !== id));
+    }
+  };
+
+  const handleUpdateStatus = async (
+    id: string,
+    status: "done" | "started" | "not-started"
+  ) => {
+    await updateStatus(id, status);
+    setBooks(books.map((b) => (b.id === id ? { ...b, status } : b)));
+  };
+
+  const handleViewReader = (book: Book) => {
+    setSelectedBook(book);
+    setCurrentView("reader");
+  };
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading your library...</p>
         </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Navigation
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        bookCount={books.length}
+      />
+
+      <main className="pt-20">
+        {currentView === "library" && (
+          <LibraryView
+            books={books}
+            onUpload={() => setCurrentView("upload")}
+            onDelete={handleDeleteBook}
+            onUpdateStatus={handleUpdateStatus}
+            onRead={handleRead}
+          />
+        )}
+
+        {currentView === "upload" && (
+          <UploadView
+            onAddBook={handleAddBook}
+            onBackToLibrary={() => setCurrentView("library")}
+            storageUsed={storageUsed}
+          />
+        )}
+
+        {currentView === "reader" && selectedBook && (
+          <ReaderView
+            book={selectedBook}
+            onBack={() => setCurrentView("library")}
+          />
+        )}
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
